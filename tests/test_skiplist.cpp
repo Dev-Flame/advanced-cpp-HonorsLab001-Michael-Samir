@@ -1,6 +1,9 @@
 #define CATCH_CONFIG_MAIN
 #include "catch.hpp"
 #include "project/SkipList.hpp"
+#include <limits>
+#include <memory>
+#include <stdexcept>
 #include <string>
 
 TEST_CASE("New skip list is empty") {
@@ -139,4 +142,129 @@ TEST_CASE("Level count stays within the configured bounds") {
         list.insert(key, key);
 
     REQUIRE(list.levelCount() == 5);
+}
+
+TEST_CASE("Constructor rejects invalid levels and probabilities") {
+    REQUIRE_THROWS_AS((SkipList<int, int>(0)), std::invalid_argument);
+    for (double probability : {-0.5, 0.0, 1.0, 1.5,
+                               std::numeric_limits<double>::quiet_NaN()}) {
+        REQUIRE_THROWS_AS((SkipList<int, int>(4, probability)),
+                          std::invalid_argument);
+    }
+}
+
+TEST_CASE("Empty and single-element lists support lookup and deletion") {
+    SkipList<int, int> list(1);
+    REQUIRE(list.levelCount() == 2);
+    REQUIRE(list.find(0) == nullptr);
+    REQUIRE_FALSE(list.contains(0));
+    REQUIRE_FALSE(list.erase(0));
+
+    REQUIRE(list.insert(-1, 42));
+    REQUIRE(list.find(-2) == nullptr);
+    REQUIRE(list.find(0) == nullptr);
+    REQUIRE(list.erase(-1));
+    REQUIRE(list.empty());
+    REQUIRE(list.items().empty());
+    REQUIRE_FALSE(list.erase(-1));
+    REQUIRE(list.insert(2, 20));
+    REQUIRE(*list.find(2) == 20);
+}
+
+TEST_CASE("Reverse insertion and deletion work with different seeds and levels") {
+    for (std::size_t maxLevel : {1u, 4u, 16u}) {
+        for (unsigned int seed : {1u, 42u, 1234u}) {
+            for (double probability : {0.25, 0.5, 0.75}) {
+                SkipList<int, int> list(maxLevel, probability, seed);
+                for (int key = 199; key >= 0; --key) {
+                    REQUIRE(list.insert(key, key * 2));
+                }
+                const auto entries = list.items();
+                REQUIRE(entries.size() == 200);
+                for (int key = 0; key < 200; ++key) {
+                    REQUIRE(entries[key] == std::make_pair(key, key * 2));
+                    REQUIRE(list.contains(key));
+                    REQUIRE(list.erase(key));
+                    REQUIRE_FALSE(list.contains(key));
+                }
+                REQUIRE(list.empty());
+                REQUIRE(list.levelCount() == maxLevel + 1);
+            }
+        }
+    }
+}
+
+TEST_CASE("Large lists preserve remaining keys after alternating deletions") {
+    SkipList<int, int> list;
+    for (int key = 2999; key >= 0; --key) {
+        list.insert(key, key + 1);
+    }
+    for (int key = 0; key < 3000; key += 2) {
+        REQUIRE(list.erase(key));
+    }
+    REQUIRE(list.size() == 1500);
+    const SkipList<int, int>& view = list;
+    for (int key = 0; key < 3000; ++key) {
+        if (key % 2 == 0) {
+            REQUIRE(view.find(key) == nullptr);
+        } else {
+            REQUIRE(view.find(key) != nullptr);
+            REQUIRE(*view.find(key) == key + 1);
+        }
+    }
+}
+
+TEST_CASE("Moved-from lists can be queried and reused") {
+    SkipList<int, int> source;
+    source.insert(1, 10);
+    SkipList<int, int> destination(std::move(source));
+    REQUIRE(source.find(1) == nullptr);
+    REQUIRE_FALSE(source.erase(1));
+    REQUIRE(source.items().empty());
+    REQUIRE(source.insert(2, 20));
+    REQUIRE(*source.find(2) == 20);
+    REQUIRE(*destination.find(1) == 10);
+
+    destination = std::move(source);
+    REQUIRE_FALSE(destination.contains(1));
+    REQUIRE(*destination.find(2) == 20);
+    REQUIRE(source.empty());
+    REQUIRE(source.insert(3, 30));
+
+    auto& sameList = destination;
+    destination = std::move(sameList);
+    REQUIRE(destination.size() == 1);
+    REQUIRE(*destination.find(2) == 20);
+}
+
+TEST_CASE("Erase, destruction, and move assignment release owned values") {
+    std::weak_ptr<int> erasedValue;
+    std::weak_ptr<int> destroyedValue;
+    std::weak_ptr<int> replacedValue;
+    {
+        SkipList<int, std::shared_ptr<int>> source;
+        auto value = std::make_shared<int>(10);
+        erasedValue = value;
+        source.insert(1, value);
+        value.reset();
+        REQUIRE_FALSE(erasedValue.expired());
+        REQUIRE(source.erase(1));
+        REQUIRE(erasedValue.expired());
+
+        value = std::make_shared<int>(20);
+        destroyedValue = value;
+        source.insert(2, value);
+        value.reset();
+
+        SkipList<int, std::shared_ptr<int>> destination;
+        value = std::make_shared<int>(30);
+        replacedValue = value;
+        destination.insert(3, value);
+        value.reset();
+
+        destination = std::move(source);
+        REQUIRE(replacedValue.expired());
+        REQUIRE_FALSE(destroyedValue.expired());
+    }
+    REQUIRE(destroyedValue.expired());
 }

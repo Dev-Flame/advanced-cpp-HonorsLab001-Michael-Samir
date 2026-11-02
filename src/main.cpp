@@ -10,8 +10,7 @@ int main() {
     index.insert(20, "Twenty");
     index.insert(50, "Fifty");
 
-    std::cout << "Skip list contents:
-";
+    std::cout << "Skip list contents:\n";
     for (const auto& [key, value] : index.items())
         std::cout << key << " -> " << value << '\n';
 
