@@ -1,0 +1,29 @@
+name: C++ Build and Test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2  # <- sets a 2-minute upper limit
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y g++
+
+      - name: Verify g++ version
+        run: g++ --version
+
+      - name: Build project
+        run: make
+
+      - name: Run main program (optional)
+        run: ./build/main
+
+      - name: Run tests
+        run: make test
